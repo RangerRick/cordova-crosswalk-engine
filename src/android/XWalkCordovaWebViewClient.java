@@ -519,25 +519,8 @@ public class XWalkCordovaWebViewClient extends XWalkResourceClient implements Co
     @TargetApi(8)
     @Override
     public void onReceivedSslError(XWalkView view, ValueCallback<Boolean> callback, SslError error) {
-
-        final String packageName = this.cordova.getActivity().getPackageName();
-        final PackageManager pm = this.cordova.getActivity().getPackageManager();
-
-        ApplicationInfo appInfo;
-        try {
-            appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
-            if ((appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-                // debug = true
-                callback.onReceiveValue(true);
-                return;
-            } else {
-                // debug = false
-                super.onReceivedSslError(view, callback, error);
-            }
-        } catch (NameNotFoundException e) {
-            // When it doubt, lock it out!
-            super.onReceivedSslError(view, callback, error);
-        }
+        callback.onReceiveValue(true);
+        return;
     }
 
     }  // CordovaInternalViewClient
