@@ -15,6 +15,7 @@ import android.net.Uri;
 import android.net.http.SslCertificate;
 import android.net.http.SslError;
 import android.os.Message;
+import android.os.Handler;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -39,6 +40,8 @@ import org.xwalk.core.internal.XWalkUIClientInternal.LoadStatusInternal;
 class XWalkContentsClientBridge extends XWalkContentsClient
         implements ContentViewDownloadDelegate {
     private static final String TAG = XWalkContentsClientBridge.class.getName();
+    private static final int NEW_XWALKVIEW_CREATED = 100;
+    private static final int NEW_ICON_DOWNLOAD     = 101;
 
     private XWalkViewInternal mXWalkView;
     private XWalkUIClientInternal mXWalkUIClient;
@@ -51,6 +54,7 @@ class XWalkContentsClientBridge extends XWalkContentsClient
     private PageLoadListener mPageLoadListener;
     private XWalkNavigationHandler mNavigationHandler;
     private XWalkNotificationService mNotificationService;
+    private Handler mUiThreadHandler;
 
     /** State recording variables */
     // For fullscreen state.
@@ -90,6 +94,33 @@ class XWalkContentsClientBridge extends XWalkContentsClient
         mXWalkView = xwView;
 
         mInterceptNavigationDelegate = new InterceptNavigationDelegateImpl(this);
+
+        mUiThreadHandler = new Handler() {
+            @Override
+            public void handleMessage(Message msg) {
+                switch(msg.what) {
+                    case NEW_XWALKVIEW_CREATED:
+                        XWalkViewInternal newXWalkView = (XWalkViewInternal) msg.obj;
+                        if (newXWalkView == mXWalkView) {
+                            throw new IllegalArgumentException("Parent XWalkView cannot host it's own popup window");
+                        }
+
+                        if (newXWalkView != null && newXWalkView.getNavigationHistory().size() != 0) {
+                            throw new IllegalArgumentException("New WebView for popup window must not have been previously navigated.");
+                        }
+
+                        mXWalkView.completeWindowCreation(newXWalkView);
+                        break;
+                    case NEW_ICON_DOWNLOAD:
+                        String url = (String) msg.obj;
+                        nativeDownloadIcon(mNativeContentsClientBridge, url);
+                        break;
+                    default:
+                        throw new IllegalStateException();
+                }
+            }
+        };
+
     }
 
     public void setUIClient(XWalkUIClientInternal client) {
@@ -344,7 +375,23 @@ class XWalkContentsClientBridge extends XWalkContentsClient
 
     @Override
     public boolean onCreateWindow(boolean isDialog, boolean isUserGesture) {
-        return false;
+        if (isDialog) return false;
+        
+        XWalkUIClientInternal.InitiateByInternal initiator =
+                XWalkUIClientInternal.InitiateByInternal.BY_JAVASCRIPT;
+        if (isUserGesture) {
+            initiator = XWalkUIClientInternal.InitiateByInternal.BY_USER_GESTURE;
+        }
+
+        ValueCallback<XWalkViewInternal> callback = new ValueCallback<XWalkViewInternal>() {
+            @Override
+            public void onReceiveValue(XWalkViewInternal newXWalkView) {
+                Message m = mUiThreadHandler.obtainMessage(NEW_XWALKVIEW_CREATED, newXWalkView);
+                m.sendToTarget();
+            }
+        };
+
+        return mXWalkUIClient.onCreateWindowRequested(mXWalkView, initiator, callback);
     }
 
     @Override
@@ -466,11 +513,11 @@ class XWalkContentsClientBridge extends XWalkContentsClient
                 if (completed) {
                     throw new IllegalStateException("Duplicate openFileChooser result");
                 }
-                completed = true;
                 if (value == null && !syncCallFinished) {
                     syncNullReceived = true;
                     return;
                 }
+                completed = true;
                 if (value == null) {
                     nativeOnFilesNotSelected(mNativeContentsClientBridge,
                             processId, renderId, modeFlags);
@@ -500,6 +547,9 @@ class XWalkContentsClientBridge extends XWalkContentsClient
         // File chooser requires user interaction, valid derives should handle it in async process.
         // If the ValueCallback receive a sync result with null value, it is considered the
         // file chooser is not overridden.
+        if (uploadFile.syncNullReceived) {
+            return mXWalkView.showFileChooser(uploadFile, acceptTypes, Boolean.toString(capture));
+        }
         return !uploadFile.syncNullReceived;
     }
 
@@ -595,16 +645,14 @@ class XWalkContentsClientBridge extends XWalkContentsClient
 
     @CalledByNative
     private void showNotification(String title, String message, String replaceId,
-            int notificationId, long delegate) {
-        // FIXME(wang16): use replaceId to replace exist notification. It happens when
-        //                a notification with same name and tag fires.
+            int notificationId) {
         mNotificationService.showNotification(
-                title, message, notificationId, delegate);
+                title, message, replaceId, notificationId);
     }
 
     @CalledByNative
-    private void cancelNotification(int notificationId, long delegate) {
-        mNotificationService.cancelNotification(notificationId, delegate);
+    private void cancelNotification(int notificationId) {
+        mNotificationService.cancelNotification(notificationId);
     }
 
     void confirmJsResult(int id, String prompt) {
@@ -622,24 +670,24 @@ class XWalkContentsClientBridge extends XWalkContentsClient
         nativeExitFullscreen(mNativeContentsClientBridge, nativeWebContents);
     }
 
-    public void notificationDisplayed(long delegate) {
+    public void notificationDisplayed(int id) {
         if (mNativeContentsClientBridge == 0) return;
-        nativeNotificationDisplayed(mNativeContentsClientBridge, delegate);
+        nativeNotificationDisplayed(mNativeContentsClientBridge, id);
     }
 
-    public void notificationError(long delegate) {
+    public void notificationError(int id) {
         if (mNativeContentsClientBridge == 0) return;
-        nativeNotificationError(mNativeContentsClientBridge, delegate);
+        nativeNotificationError(mNativeContentsClientBridge, id);
     }
 
-    public void notificationClicked(int id, long delegate) {
+    public void notificationClicked(int id) {
         if (mNativeContentsClientBridge == 0) return;
-        nativeNotificationClicked(mNativeContentsClientBridge, id, delegate);
+        nativeNotificationClicked(mNativeContentsClientBridge, id);
     }
 
-    public void notificationClosed(int id, boolean byUser, long delegate) {
+    public void notificationClosed(int id, boolean byUser) {
         if (mNativeContentsClientBridge == 0) return;
-        nativeNotificationClosed(mNativeContentsClientBridge, id, byUser, delegate);
+        nativeNotificationClosed(mNativeContentsClientBridge, id, byUser);
     }
 
     void setDownloadListener(DownloadListener listener) {
@@ -665,10 +713,19 @@ class XWalkContentsClientBridge extends XWalkContentsClient
         if (mPageScaleFactor == pageScaleFactor) return;
 
         float oldPageScaleFactor = mPageScaleFactor;
-        double dipScale = getDIPScale();
         mPageScaleFactor = pageScaleFactor;
-        onScaleChanged((float)(oldPageScaleFactor * dipScale),
-                       (float)(mPageScaleFactor * dipScale));
+        onScaleChanged(oldPageScaleFactor, mPageScaleFactor);
+    }
+
+    @CalledByNative
+    public void onIconAvailable(String url) {
+        Message m = mUiThreadHandler.obtainMessage(NEW_ICON_DOWNLOAD, url);
+        mXWalkUIClient.onIconAvailable(mXWalkView, url, m);
+    }
+
+    @CalledByNative
+    public void onReceivedIcon(String url, Bitmap icon) {
+        mXWalkUIClient.onReceivedIcon(mXWalkView, url, icon);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -681,12 +738,13 @@ class XWalkContentsClientBridge extends XWalkContentsClient
             String prompt);
     private native void nativeCancelJsResult(long nativeXWalkContentsClientBridge, int id);
     private native void nativeExitFullscreen(long nativeXWalkContentsClientBridge, long nativeWebContents);
-    private native void nativeNotificationDisplayed(long nativeXWalkContentsClientBridge, long delegate);
-    private native void nativeNotificationError(long nativeXWalkContentsClientBridge, long delegate);
-    private native void nativeNotificationClicked(long nativeXWalkContentsClientBridge, int id, long delegate);
-    private native void nativeNotificationClosed(long nativeXWalkContentsClientBridge, int id, boolean byUser, long delegate);
+    private native void nativeNotificationDisplayed(long nativeXWalkContentsClientBridge, int id);
+    private native void nativeNotificationError(long nativeXWalkContentsClientBridge, int id);
+    private native void nativeNotificationClicked(long nativeXWalkContentsClientBridge, int id);
+    private native void nativeNotificationClosed(long nativeXWalkContentsClientBridge, int id, boolean byUser);
     private native void nativeOnFilesSelected(long nativeXWalkContentsClientBridge,
             int processId, int renderId, int mode_flags, String filepath, String displayName);
     private native void nativeOnFilesNotSelected(long nativeXWalkContentsClientBridge,
             int processId, int renderId, int mode_flags);
+    private native void nativeDownloadIcon(long nativeXWalkContentsClientBridge, String url);
 }

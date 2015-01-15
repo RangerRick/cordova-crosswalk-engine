@@ -1,3 +1,4 @@
+#!/bin/sh
 set -e
 
 ARM_DOWNLOAD="https://download.01.org/crosswalk/releases/crosswalk/android/stable/10.39.235.15/arm/crosswalk-webview-10.39.235.15-arm.zip";
@@ -19,5 +20,6 @@ download() {
     rm -r $TMPDIR
 }
 
+rm -rf libs/xwalk_core_library
 download $ARM_DOWNLOAD
 download $X86_DOWNLOAD
