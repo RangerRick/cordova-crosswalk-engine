@@ -1,7 +1,7 @@
 set -e
 
-ARM_DOWNLOAD="https://download.01.org/crosswalk/releases/crosswalk/android/stable/8.37.189.14/arm/crosswalk-webview-8.37.189.14-arm.zip";
-X86_DOWNLOAD="https://download.01.org/crosswalk/releases/crosswalk/android/stable/8.37.189.14/x86/crosswalk-webview-8.37.189.14-x86.zip";
+ARM_DOWNLOAD="https://download.01.org/crosswalk/releases/crosswalk/android/stable/10.39.235.15/arm/crosswalk-webview-10.39.235.15-arm.zip";
+X86_DOWNLOAD="https://download.01.org/crosswalk/releases/crosswalk/android/stable/10.39.235.15/x86/crosswalk-webview-10.39.235.15-x86.zip";
 
 download() {
     TMPDIR=cordova-crosswalk-engine-$$
